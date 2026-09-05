@@ -1,0 +1,21 @@
+{
+  "name": "studyquiz",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run parse && vite",
+    "build": "npm run parse && vite build",
+    "parse": "node scripts/parse-questions.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.0",
+    "idb": "^8.0.0"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "^4.10.38",
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^0.21.0"
+  }
+}
