@@ -6,6 +6,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const preguntasDir = path.join(rootDir, 'Preguntas');
 const solucionesDir = path.join(rootDir, 'Soluciones');
+const examenesDir = path.join(rootDir, 'Examenes');
+const az900NewPath = path.join(examenesDir, 'AZ900_Preguntas_y_Respuestas_ES.md');
 const outputPath = path.join(rootDir, 'src', 'data', 'questions.json');
 
 // ===== MAIN =====
@@ -21,6 +23,24 @@ function main() {
 
   for (const pFile of preguntaFiles) {
     const prefix = pFile.replace('_Preguntas.md', '');
+    const subjectId = prefix.toLowerCase();
+
+    // Check if it's AZ-900 and the new comprehensive document exists
+    if (subjectId === 'az900' && fs.existsSync(az900NewPath)) {
+      const az900Content = fs.readFileSync(az900NewPath, 'utf-8');
+      const azExams = parseNewAZ900(az900Content, subjectId);
+      const totalQuestions = azExams.reduce((t, e) => t + e.questions.length, 0);
+
+      subjects.push({
+        id: subjectId,
+        name: 'Certificación Microsoft Azure Fundamentals (AZ-900)',
+        exams: azExams,
+      });
+
+      console.log(`  📘 Certificación Microsoft Azure Fundamentals (AZ-900): ${azExams.length} módulos, ${totalQuestions} preguntas (Multiformato oficial)`);
+      continue;
+    }
+
     const sFile = `${prefix}_Soluciones.md`;
     const sFilePath = path.join(solucionesDir, sFile);
 
@@ -40,12 +60,12 @@ function main() {
     const solutions = parseSolutions(solucionesContent);
 
     // Parse questions and cross-reference with solutions
-    const exams = parseQuestions(preguntasContent, solutions, prefix.toLowerCase());
+    const exams = parseQuestions(preguntasContent, solutions, subjectId);
 
     const totalQuestions = exams.reduce((t, e) => t + e.questions.length, 0);
 
     subjects.push({
-      id: prefix.toLowerCase(),
+      id: subjectId,
       name: subjectName,
       exams,
     });
@@ -59,6 +79,232 @@ function main() {
 
   const total = subjects.reduce((t, s) => t + s.exams.reduce((t2, e) => t2 + e.questions.length, 0), 0);
   console.log(`\n✅ Generado questions.json: ${total} preguntas de ${subjects.length} asignatura(s)`);
+}
+
+// ===== PARSE NEW MULTI-FORMAT AZ-900 EXAM DOCUMENT =====
+function parseNewAZ900(md, subjectId) {
+  const lines = md.split(/\r?\n/);
+  const moduleMap = new Map();
+  let currentModuleName = 'Módulo 1: Conceptos de Nube';
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Detect module header: ## Módulo X: ...
+    const modMatch = line.match(/^##\s+(Módulo\s+\d+:\s+[^#\n]+)/);
+    if (modMatch) {
+      currentModuleName = modMatch[1].trim();
+      if (!moduleMap.has(currentModuleName)) {
+        moduleMap.set(currentModuleName, []);
+      }
+      i++;
+      continue;
+    }
+
+    // Detect question start: ### 1. `[Tipo]` Enunciado...
+    const qMatch = line.match(/^###\s+(\d+)\.\s+`\[([^\]]+)\]`\s*(.*)/);
+    if (qMatch) {
+      if (!moduleMap.has(currentModuleName)) {
+        moduleMap.set(currentModuleName, []);
+      }
+
+      const qNum = parseInt(qMatch[1]);
+      const tag = qMatch[2].trim();
+      let qText = qMatch[3].trim();
+
+      i++;
+      // Collect multi-line question text until options or details
+      while (i < lines.length && 
+             !lines[i].startsWith('- [') && 
+             !lines[i].startsWith('|') && 
+             !lines[i].match(/^\d+\.\s+\*/) && 
+             !lines[i].startsWith('<details>') && 
+             !lines[i].startsWith('---') &&
+             !lines[i].startsWith('###')) {
+        if (lines[i].trim()) {
+          qText += '\n' + lines[i].trim();
+        }
+        i++;
+      }
+
+      // Collect question body lines until <details>
+      const bodyLines = [];
+      while (i < lines.length && !lines[i].startsWith('<details>') && !lines[i].startsWith('---') && !lines[i].startsWith('###')) {
+        bodyLines.push(lines[i]);
+        i++;
+      }
+
+      // Collect details block (solution, explanation, discards)
+      const detailsLines = [];
+      if (i < lines.length && lines[i].startsWith('<details>')) {
+        while (i < lines.length && !lines[i].startsWith('</details>')) {
+          detailsLines.push(lines[i]);
+          i++;
+        }
+        if (i < lines.length && lines[i].startsWith('</details>')) {
+          detailsLines.push(lines[i]);
+          i++;
+        }
+      }
+
+      const detailsText = detailsLines.join('\n');
+
+      // Extract explanation and discards
+      const expMatch = detailsText.match(/\*\*Explicación:\*\*\s*([\s\S]*?)(?=\*\*Descartes:\*\*|<\/details>|$)/i);
+      const explanation = expMatch ? expMatch[1].trim() : '';
+
+      const discMatch = detailsText.match(/\*\*Descartes:\*\*\s*([\s\S]*?)(?=<\/details>|$)/i);
+      const discards = discMatch ? discMatch[1].trim() : '';
+
+      const modNumberMatch = currentModuleName.match(/Módulo\s+(\d+)/i);
+      const modNum = modNumberMatch ? modNumberMatch[1] : '1';
+
+      // Determine format and parse accordingly
+      let qObj = {
+        id: `${subjectId}_m${modNum}_${qNum}`,
+        number: qNum,
+        module: currentModuleName,
+        tag: tag,
+        text: qText,
+        textEn: null,
+        explanation,
+        discards,
+      };
+
+      if (tag === 'Serie Sí / No (Verdadero / Falso)') {
+        qObj.format = 'yesno';
+        qObj.type = 'yesno';
+        const statements = [];
+        bodyLines.forEach(bl => {
+          const stmMatch = bl.trim().match(/^(\d+)\.\s*\*(.*?)\*/);
+          if (stmMatch) {
+            statements.push({
+              id: parseInt(stmMatch[1]),
+              text: stmMatch[2].trim(),
+            });
+          }
+        });
+        statements.forEach(st => {
+          const solM = detailsText.match(new RegExp(`Afirmación\\s+${st.id}:\\s*\\*\\*(Sí|No)\\*\\*`, 'i'));
+          st.correct = solM ? solM[1] : '';
+        });
+        qObj.statements = statements;
+      } else if (tag === 'Arrastrar y Soltar / Emparejamiento') {
+        qObj.format = 'matching';
+        qObj.type = 'matching';
+        const tableLines = bodyLines.filter(bl => bl.trim().startsWith('|'));
+        const pairs = [];
+        const targets = [];
+
+        tableLines.forEach(tl => {
+          const parts = tl.split('|').map(p => p.trim()).filter(Boolean);
+          if (parts.length >= 3 && parts[0].includes('**') && parts[1].match(/\*\*[A-E]\*\*/)) {
+            const leftRaw = parts[0].replace(/\*\*/g, '').trim();
+            const leftM = leftRaw.match(/^(\d+)\.\s*(.*)/);
+            const targetKey = parts[1].replace(/\*\*/g, '').trim();
+            const targetText = parts[2].trim();
+            if (leftM) {
+              pairs.push({
+                num: parseInt(leftM[1]),
+                left: leftM[2].trim(),
+              });
+            }
+            targets.push({
+              key: targetKey,
+              text: targetText,
+            });
+          } else if (parts.length >= 2 && parts[0].includes('**') && parts[1] === '?') {
+            const leftRaw = parts[0].replace(/\*\*/g, '').trim();
+            const leftM = leftRaw.match(/^(\d+)\.\s*(.*)/);
+            if (leftM) {
+              pairs.push({
+                num: parseInt(leftM[1]),
+                left: leftM[2].trim(),
+              });
+            }
+          }
+        });
+
+        pairs.forEach(p => {
+          const matchSol = detailsText.match(new RegExp(`\\*\\*${p.num}\\s*[➔\\->]+\\s*([A-E])\\*\\*`, 'i'));
+          p.correctKey = matchSol ? matchSol[1].toUpperCase() : '';
+        });
+
+        if (targets.length === 0) {
+          const optMatch = qText.match(/\*\*A\s*\(([^)]+)\)\*\*\s*o\s*\*\*B\s*\(([^)]+)\)\*\*/i);
+          if (optMatch) {
+            targets.push({ key: 'A', text: optMatch[1].trim() });
+            targets.push({ key: 'B', text: optMatch[2].trim() });
+          }
+        }
+
+        qObj.pairs = pairs;
+        qObj.targets = targets;
+      } else {
+        const options = [];
+        bodyLines.forEach(bl => {
+          const optM = bl.trim().match(/^-\s*\[([A-E])\]\s*(.+)/);
+          if (optM) {
+            options.push({
+              key: optM[1].toUpperCase(),
+              text: optM[2].trim(),
+              textEn: null,
+            });
+          }
+        });
+
+        const isMulti = tag === 'Selección Múltiple' || 
+                        qText.includes('Seleccione DOS') || 
+                        qText.includes('Seleccione TRES') || 
+                        detailsText.includes('Respuestas correctas:');
+
+        if (isMulti) {
+          qObj.format = 'multi';
+          qObj.type = 'multi';
+          let reqCount = 2;
+          if (qText.includes('TRES')) reqCount = 3;
+          qObj.requiredCount = reqCount;
+          const ansMatch = detailsText.match(/\*\*Respuestas correctas:\s*([^*]+)\*\*/i);
+          const correctKeys = [];
+          if (ansMatch) {
+            const raw = ansMatch[1];
+            const letters = raw.match(/[A-E]/g);
+            if (letters) correctKeys.push(...letters);
+          }
+          qObj.options = options;
+          qObj.correctAnswers = [...new Set(correctKeys)];
+          qObj.correctAnswer = qObj.correctAnswers.join(', ');
+        } else {
+          qObj.format = 'single';
+          qObj.type = 'single';
+          const ansMatch = detailsText.match(/\*\*Respuesta correcta:\s*([A-E])\*\*/i);
+          qObj.correctAnswer = ansMatch ? ansMatch[1].toUpperCase() : '';
+          qObj.options = options;
+        }
+      }
+
+      moduleMap.get(currentModuleName).push(qObj);
+      continue;
+    }
+
+    i++;
+  }
+
+  // Convert map to exam objects
+  const exams = [];
+  let modIndex = 1;
+  for (const [modName, questions] of moduleMap.entries()) {
+    exams.push({
+      id: `${subjectId}_modulo_${modIndex}`,
+      name: `${modName} (${questions.length} preguntas)`,
+      year: 2026,
+      questions,
+    });
+    modIndex++;
+  }
+
+  return exams;
 }
 
 // ===== PARSE SOLUTIONS =====
@@ -89,7 +335,7 @@ function parseSolutions(content) {
   return solutions;
 }
 
-// ===== PARSE QUESTIONS =====
+// ===== PARSE QUESTIONS (LEGACY FORMAT) =====
 function parseQuestions(content, solutions, subjectId) {
   const exams = [];
   let currentExam = null;
@@ -188,7 +434,6 @@ function parseQuestions(content, solutions, subjectId) {
     }
 
     // Additional text lines for multi-line questions
-    // Only append if we have a current question and no options yet
     if (currentQuestion && currentOptions.length === 0 && trimmed) {
       if (currentQuestion.textEn) {
         currentQuestion.textEn += '\n' + trimmed;

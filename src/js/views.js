@@ -30,6 +30,16 @@ import {
   renderEssayQuestionReview,
 } from './essayQuestion.js';
 import {
+  getQuestionTypeBadge,
+  renderMultiQuestionInteractive,
+  renderYesNoQuestionInteractive,
+  renderMatchingQuestionInteractive,
+  renderMultiQuestionReview,
+  renderYesNoQuestionReview,
+  renderMatchingQuestionReview,
+  renderExplanationBlock,
+} from './az900Questions.js';
+import {
   getLanguage,
   setLanguage,
   getQuestionText,
@@ -137,11 +147,11 @@ function openExamPickerModal(subjectId) {
   // Group exams by year
   const groups = {};
   for (const exam of subject.exams) {
-    let year = 'Temáticos';
+    let year = subject.id.includes('az900') ? 'Módulos Oficiales' : 'Temáticos';
     const yearMatch = exam.name.match(/\b(202[0-9])\b/);
-    if (yearMatch) {
+    if (!subject.id.includes('az900') && yearMatch) {
       year = yearMatch[1];
-    } else if (exam.id.startsWith('202')) {
+    } else if (!subject.id.includes('az900') && exam.id.startsWith('202')) {
       year = exam.id.substring(0, 4);
     }
     if (!groups[year]) groups[year] = [];
@@ -149,8 +159,8 @@ function openExamPickerModal(subjectId) {
   }
 
   const sortedYears = Object.keys(groups).sort((a, b) => {
-    if (a === 'Temáticos') return 1;
-    if (b === 'Temáticos') return -1;
+    if (a === 'Temáticos' || a === 'Módulos Oficiales') return 1;
+    if (b === 'Temáticos' || b === 'Módulos Oficiales') return -1;
     return b.localeCompare(a);
   });
 
@@ -159,8 +169,8 @@ function openExamPickerModal(subjectId) {
       <div class="modal-card">
         <div class="modal-card__header">
           <div class="modal-card__title-group">
-            <h2 class="modal-card__title" id="modal-exam-title">${icons.clipboard('ui-icon ui-icon--md')} Elegir Convocatoria / Modelo</h2>
-            <p class="modal-card__subtitle">${escapeHtml(subject.name)} · ${subject.exams.length} exámenes disponibles</p>
+            <h2 class="modal-card__title" id="modal-exam-title">${icons.clipboard('ui-icon ui-icon--md')} ${subject.id.includes('az900') ? 'Elegir Módulo Temático' : 'Elegir Convocatoria / Modelo'}</h2>
+            <p class="modal-card__subtitle">${escapeHtml(subject.name)} · ${subject.exams.length} ${subject.id.includes('az900') ? 'módulos oficiales disponibles' : 'exámenes disponibles'}</p>
           </div>
           <button class="modal-close-btn" id="modal-close" aria-label="Cerrar modal">&times;</button>
         </div>
@@ -175,10 +185,10 @@ function openExamPickerModal(subjectId) {
 
           <div class="modal-exams-grid" id="modal-exams-container">
             ${subject.exams.map(exam => {
-              let year = 'Temáticos';
+              let year = subject.id.includes('az900') ? 'Módulos Oficiales' : 'Temáticos';
               const yearMatch = exam.name.match(/\b(202[0-9])\b/);
-              if (yearMatch) year = yearMatch[1];
-              else if (exam.id.startsWith('202')) year = exam.id.substring(0, 4);
+              if (!subject.id.includes('az900') && yearMatch) year = yearMatch[1];
+              else if (!subject.id.includes('az900') && exam.id.startsWith('202')) year = exam.id.substring(0, 4);
 
               const isOrdinaria = exam.name.toLowerCase().includes('ordinaria');
               const isExtraordinaria = exam.name.toLowerCase().includes('extraordinaria');
@@ -319,7 +329,7 @@ export async function renderDashboard(container) {
             </button>
             ${subject.exams.length > 1 ? `
               <button class="btn btn--secondary btn--lg btn--full btn--model-picker" data-action="select-model" data-subject="${subject.id}" id="btn-model-${subject.id}">
-                ${icons.list('ui-icon')} Elegir Convocatoria / Modelo (${subject.exams.length})
+                ${icons.list('ui-icon')} ${subject.id.includes('az900') ? `Elegir Módulo Temático (${subject.exams.length})` : `Elegir Convocatoria / Modelo (${subject.exams.length})`}
               </button>
             ` : ''}
           </div>
@@ -433,7 +443,7 @@ export function renderQuiz(container) {
         <div class="quiz__body">
           <div class="quiz__question-card">
             <div class="quiz__question-meta">
-              <span class="quiz__question-badge">${q.examName || ''}</span>
+              ${getQuestionTypeBadge(q)}
             </div>
             <p class="quiz__question-text">${escapeHtml(getQuestionText(q))}</p>
           </div>
@@ -443,9 +453,15 @@ export function renderQuiz(container) {
               ? renderCodeQuestionInteractive(q, answers[q.id] || {})
               : q.type === 'essay'
               ? renderEssayQuestionInteractive(q, answers[q.id] || {})
+              : q.type === 'multi'
+              ? renderMultiQuestionInteractive(q, answers[q.id] || [])
+              : q.type === 'yesno'
+              ? renderYesNoQuestionInteractive(q, answers[q.id] || {})
+              : q.type === 'matching'
+              ? renderMatchingQuestionInteractive(q, answers[q.id] || {})
               : `
             <div class="quiz__options" role="radiogroup" aria-label="Opciones de respuesta">
-              ${q.options
+              ${(q.options || [])
                 .map(
                   opt => `
                 <label class="quiz__option ${answers[q.id] === opt.key ? 'quiz__option--selected' : ''}" id="option-${opt.key}">
@@ -473,6 +489,12 @@ export function renderQuiz(container) {
                     ? answers[qItem.id] && Object.values(answers[qItem.id]).some(v => String(v).trim().length > 0)
                     : qItem.type === 'essay'
                     ? answers[qItem.id] && (answers[qItem.id].selfScore !== undefined || (answers[qItem.id].text || '').trim().length > 0)
+                    : qItem.type === 'multi'
+                    ? Array.isArray(answers[qItem.id]) && answers[qItem.id].length >= (qItem.requiredCount || 1)
+                    : qItem.type === 'yesno'
+                    ? answers[qItem.id] && (qItem.statements || []).every(st => answers[qItem.id][st.id])
+                    : qItem.type === 'matching'
+                    ? answers[qItem.id] && (qItem.pairs || []).every(p => answers[qItem.id][p.num])
                     : !!answers[qItem.id];
                 return `
                   <button class="indicator ${i === currentIndex ? 'indicator--current' : ''} ${isAnswered ? 'indicator--answered' : ''}"
@@ -507,7 +529,7 @@ export function renderQuiz(container) {
       });
     });
 
-    // Bind inputs for code-fill, essay, or radio selection
+    // Bind inputs for code-fill, essay, multi, yesno, matching, or radio selection
     if (q.type === 'code-fill') {
       container.querySelectorAll('.code-gap-input').forEach(input => {
         input.addEventListener('input', e => {
@@ -568,6 +590,72 @@ export function renderQuiz(container) {
           });
         });
       }
+    } else if (q.type === 'multi') {
+      container.querySelectorAll('input[name="answer-multi"]').forEach(input => {
+        input.addEventListener('change', e => {
+          if (!Array.isArray(answers[q.id])) answers[q.id] = [];
+          const val = e.target.value;
+          if (e.target.checked) {
+            if (!answers[q.id].includes(val)) answers[q.id].push(val);
+          } else {
+            answers[q.id] = answers[q.id].filter(k => k !== val);
+          }
+
+          input.closest('.quiz__option').classList.toggle('quiz__option--selected', e.target.checked);
+
+          const counter = container.querySelector('.quiz__multi-counter');
+          if (counter) {
+            const reqCount = q.requiredCount || 2;
+            counter.textContent = `${answers[q.id].length} / ${reqCount} seleccionadas`;
+            counter.classList.toggle('quiz__multi-counter--complete', answers[q.id].length === reqCount);
+          }
+
+          const ind = container.querySelector(`.indicator[data-index="${currentIndex}"]`);
+          if (ind) {
+            if (answers[q.id].length >= (q.requiredCount || 1)) ind.classList.add('indicator--answered');
+            else ind.classList.remove('indicator--answered');
+          }
+        });
+      });
+    } else if (q.type === 'yesno') {
+      container.querySelectorAll('.btn-yesno').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const stmtId = parseInt(btn.dataset.stmt);
+          const val = btn.dataset.val;
+          if (!answers[q.id] || typeof answers[q.id] !== 'object') answers[q.id] = {};
+          answers[q.id][stmtId] = val;
+
+          const row = btn.closest('.quiz__yesno-row');
+          row.querySelectorAll('.btn-yesno').forEach(b => {
+            b.classList.remove('btn-yesno--active-yes', 'btn-yesno--active-no');
+          });
+          btn.classList.add(val === 'Sí' ? 'btn-yesno--active-yes' : 'btn-yesno--active-no');
+
+          const allAnswered = (q.statements || []).every(st => answers[q.id][st.id]);
+          const ind = container.querySelector(`.indicator[data-index="${currentIndex}"]`);
+          if (ind) {
+            if (allAnswered) ind.classList.add('indicator--answered');
+            else ind.classList.remove('indicator--answered');
+          }
+        });
+      });
+    } else if (q.type === 'matching') {
+      container.querySelectorAll('.quiz__matching-select').forEach(sel => {
+        sel.addEventListener('change', e => {
+          const pairNum = parseInt(sel.dataset.pairNum);
+          const val = e.target.value;
+          if (!answers[q.id] || typeof answers[q.id] !== 'object') answers[q.id] = {};
+          if (val) answers[q.id][pairNum] = val;
+          else delete answers[q.id][pairNum];
+
+          const allAnswered = (q.pairs || []).every(p => answers[q.id][p.num]);
+          const ind = container.querySelector(`.indicator[data-index="${currentIndex}"]`);
+          if (ind) {
+            if (allAnswered) ind.classList.add('indicator--answered');
+            else ind.classList.remove('indicator--answered');
+          }
+        });
+      });
     } else {
       container.querySelectorAll('input[name="answer"]').forEach(input => {
         input.addEventListener('change', e => {
@@ -670,6 +758,8 @@ export function renderResults(container) {
   const currentLang = getLanguage();
   const reviewCards = results.details
     .map((d, i) => {
+      const examOrModule = d.question.examName || d.question.module || '';
+
       if (d.question.type === 'code-fill') {
         const reviewData = renderCodeQuestionReview(d.question, d.userAnswer || {});
         return `
@@ -677,10 +767,11 @@ export function renderResults(container) {
             <div class="result-card__header">
               <span class="result-card__number">${i + 1}</span>
               <span class="result-card__status">${d.isCorrect ? icons.checkCircle('ui-icon text--success') : icons.xCircle('ui-icon text--error')}</span>
-              <span class="result-card__exam">${d.question.examName || ''}</span>
+              <span class="result-card__exam">${escapeHtml(examOrModule)}</span>
             </div>
             <p class="result-card__question">${escapeHtml(getQuestionText(d.question, currentLang))}</p>
             ${reviewData.html}
+            ${renderExplanationBlock(d.question)}
           </div>
         `;
       } else if (d.question.type === 'essay') {
@@ -690,10 +781,50 @@ export function renderResults(container) {
             <div class="result-card__header">
               <span class="result-card__number">${i + 1}</span>
               <span class="result-card__status">${d.isCorrect ? icons.checkCircle('ui-icon text--success') : d.questionScore === 0.5 ? icons.minusCircle('ui-icon text--warning') : icons.xCircle('ui-icon text--error')}</span>
-              <span class="result-card__exam">${d.question.examName || ''}</span>
+              <span class="result-card__exam">${escapeHtml(examOrModule)}</span>
             </div>
             <p class="result-card__question">${escapeHtml(getQuestionText(d.question, currentLang))}</p>
             ${reviewData.html}
+            ${renderExplanationBlock(d.question)}
+          </div>
+        `;
+      } else if (d.question.type === 'multi') {
+        return `
+          <div class="result-card ${d.isCorrect ? 'result-card--correct' : 'result-card--incorrect'}" id="result-${i}">
+            <div class="result-card__header">
+              <span class="result-card__number">${i + 1}</span>
+              <span class="result-card__status">${d.isCorrect ? icons.checkCircle('ui-icon text--success') : icons.xCircle('ui-icon text--error')}</span>
+              <span class="result-card__exam">${escapeHtml(examOrModule)}</span>
+            </div>
+            <p class="result-card__question">${escapeHtml(getQuestionText(d.question, currentLang))}</p>
+            ${renderMultiQuestionReview(d.question, d.userAnswer || [])}
+            ${renderExplanationBlock(d.question)}
+          </div>
+        `;
+      } else if (d.question.type === 'yesno') {
+        return `
+          <div class="result-card ${d.isCorrect ? 'result-card--correct' : 'result-card--incorrect'}" id="result-${i}">
+            <div class="result-card__header">
+              <span class="result-card__number">${i + 1}</span>
+              <span class="result-card__status">${d.isCorrect ? icons.checkCircle('ui-icon text--success') : icons.xCircle('ui-icon text--error')}</span>
+              <span class="result-card__exam">${escapeHtml(examOrModule)}</span>
+            </div>
+            <p class="result-card__question">${escapeHtml(getQuestionText(d.question, currentLang))}</p>
+            ${renderYesNoQuestionReview(d.question, d.userAnswer || {})}
+            ${renderExplanationBlock(d.question)}
+          </div>
+        `;
+      } else if (d.question.type === 'matching') {
+        return `
+          <div class="result-card ${d.isCorrect ? 'result-card--correct' : 'result-card--incorrect'}" id="result-${i}">
+            <div class="result-card__header">
+              <span class="result-card__number">${i + 1}</span>
+              <span class="result-card__status">${d.isCorrect ? icons.checkCircle('ui-icon text--success') : icons.xCircle('ui-icon text--error')}</span>
+              <span class="result-card__exam">${escapeHtml(examOrModule)}</span>
+            </div>
+            <p class="result-card__question">${escapeHtml(getQuestionText(d.question, currentLang))}</p>
+            ${renderMatchingQuestionReview(d.question, d.userAnswer || {})}
+            ${renderExplanationBlock(d.question)}
           </div>
         `;
       }
@@ -730,7 +861,7 @@ export function renderResults(container) {
           <div class="result-card__header">
             <span class="result-card__number">${i + 1}</span>
             <span class="result-card__status">${d.isCorrect ? icons.checkCircle('ui-icon text--success') : icons.xCircle('ui-icon text--error')}</span>
-            <span class="result-card__exam">${d.question.examName || ''}</span>
+            <span class="result-card__exam">${escapeHtml(examOrModule)}</span>
           </div>
           <p class="result-card__question">${escapeHtml(getQuestionText(d.question, currentLang))}</p>
           ${
@@ -741,6 +872,7 @@ export function renderResults(container) {
           <div class="result-card__options">
             ${optionsHtml}
           </div>
+          ${renderExplanationBlock(d.question)}
         </div>
       `;
     })

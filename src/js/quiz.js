@@ -61,6 +61,25 @@ export function calculateResults(questions, answers) {
         : 0;
       questionScore = Number(selfScore) || 0;
       isCorrect = questionScore === 1.0;
+    } else if (question.type === 'multi') {
+      const userArr = Array.isArray(userAnswer) ? userAnswer : [];
+      const correctArr = Array.isArray(question.correctAnswers) ? question.correctAnswers : [];
+      const userSorted = [...userArr].sort();
+      const correctSorted = [...correctArr].sort();
+      isCorrect = userSorted.length === correctSorted.length && userSorted.every((val, idx) => val === correctSorted[idx]);
+      questionScore = isCorrect ? 1 : 0;
+    } else if (question.type === 'yesno') {
+      const userObj = userAnswer && typeof userAnswer === 'object' ? userAnswer : {};
+      const statements = question.statements || [];
+      const correctCount = statements.filter(st => userObj[st.id] === st.correct).length;
+      questionScore = statements.length > 0 ? (correctCount / statements.length) : 0;
+      isCorrect = questionScore === 1;
+    } else if (question.type === 'matching') {
+      const userObj = userAnswer && typeof userAnswer === 'object' ? userAnswer : {};
+      const pairs = question.pairs || [];
+      const correctCount = pairs.filter(p => userObj[p.num] === p.correctKey).length;
+      questionScore = pairs.length > 0 ? (correctCount / pairs.length) : 0;
+      isCorrect = questionScore === 1;
     } else {
       isCorrect = userAnswer !== null && userAnswer === question.correctAnswer;
       questionScore = isCorrect ? 1 : 0;

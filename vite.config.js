@@ -2,7 +2,6 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  base: '/quizz-app/', // './', o '/nombre-de-tu-repositorio/',
   root: 'src',
   build: {
     outDir: '../dist',
